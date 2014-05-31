@@ -16,20 +16,30 @@
 
 package com.spotify.trickle;
 
+import com.google.common.base.Function;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.ListenableFuture;
 
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executor;
 
+import javax.annotation.Nullable;
+
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
+import static com.google.common.collect.Lists.newLinkedList;
+import static com.google.common.collect.Maps.newConcurrentMap;
 import static com.google.common.collect.Maps.newHashMap;
 
 class TraverseState {
   private final Map<Input<?>, Object> bindings;
   private final Map<Graph<?>, ListenableFuture<?>> visited = newHashMap();
+  private final List<FutureCallInformation> callInformation = newLinkedList();
   private final Executor executor;
 
   TraverseState(Map<Input<?>, Object> bindings, Executor executor) {
@@ -83,13 +93,41 @@ class TraverseState {
     return executor;
   }
 
+  public List<FutureCallInformation> getCallInformation() {
+    return ImmutableList.copyOf(callInformation);
+  }
+
   void addBindings(Map<Input<?>, Object> newBindings) {
     Sets.SetView<Input<?>> intersection = Sets.intersection(bindings.keySet(), newBindings.keySet());
     checkState(intersection.isEmpty(), "Duplicate binding for inputs: %s", intersection);
     bindings.putAll(newBindings);
   }
 
+  void record(NodeInfo node, List<Dep<?>> deps, List<ListenableFuture<?>> parameterValues) {
+    List<NodeInfo> parameters = Lists.transform(deps, new Function<Dep<?>, NodeInfo>() {
+      @Override
+      public NodeInfo apply(Dep<?> input) {
+        return input.getNodeInfo();
+      }
+    });
+
+    callInformation.add(new FutureCallInformation(node, parameters, parameterValues));
+  }
+
   static TraverseState empty(Executor executor) {
     return new TraverseState(Maps.<Input<?>, Object>newHashMap(), executor);
+  }
+
+  static class FutureCallInformation {
+    final NodeInfo node;
+    final List<NodeInfo> parameters;
+    final List<ListenableFuture<?>> parameterFutures;
+
+    FutureCallInformation(NodeInfo node, List<NodeInfo> parameters,
+                          List<ListenableFuture<?>> parameterFutures) {
+      this.node = node;
+      this.parameters = parameters;
+      this.parameterFutures = parameterFutures;
+    }
   }
 }
